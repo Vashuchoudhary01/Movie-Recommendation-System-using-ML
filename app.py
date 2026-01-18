@@ -1,15 +1,17 @@
 import streamlit as st
 import pickle
 import pandas as pd
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(
-    page_title="Movie Recommender Using Machine Learning",
+    page_title="Movie Recommendation System Using Machine Learning",
     page_icon="🎬",
     layout="wide"
 )
 
-# -------------------- SAFE UI CSS (NO THEME BREAKING) --------------------
+# -------------------- UI CSS --------------------
 st.markdown(
     """
     <style>
@@ -29,7 +31,6 @@ st.markdown(
         font-weight:600;
         line-height:1.3;
         color:#f5f5f5;
-        word-wrap:break-word;
     }
     </style>
     """,
@@ -37,15 +38,15 @@ st.markdown(
 )
 
 # -------------------- LOAD DATA --------------------
-@st.cache_resource
+@st.cache_data
 def load_data():
-    with open("movie_dict.pkl", "rb") as f:
-        movies_dict = pickle.load(f)
-
-    with open("similarity.pkl", "rb") as f:
-        similarity = pickle.load(f)
-
+    movies_dict = pickle.load(open("movie_dict.pkl", "rb"))
     movies = pd.DataFrame(movies_dict)
+
+    cv = CountVectorizer(max_features=5000, stop_words="english")
+    vectors = cv.fit_transform(movies["Tags"]).toarray()
+    similarity = cosine_similarity(vectors)
+
     return movies, similarity
 
 movies, similarity = load_data()
@@ -53,28 +54,20 @@ movies, similarity = load_data()
 # -------------------- RECOMMEND FUNCTION --------------------
 def recommend(movie_title):
     if movie_title not in movies["title"].values:
-        return [], [], []
+        return [], []
 
-    movie_index = movies[movies["title"] == movie_title].index[0]
-    distances = similarity[movie_index]
-
-    movies_list = sorted(
-        list(enumerate(distances)),
+    idx = movies[movies["title"] == movie_title].index[0]
+    scores = sorted(
+        list(enumerate(similarity[idx])),
         key=lambda x: x[1],
         reverse=True
     )[1:6]
-    titles = [movies.iloc[i[0]].title for i in movies_list]
 
-    raw_ratings = [movies.iloc[i[0]].vote_average for i in movies_list]
-
-    ratings = []
-    for r in raw_ratings:
-        if r >= 5:
-            ratings.append(5)
-        elif 4 <= r < 5:
-            ratings.append(4)
-        else:
-            ratings.append(2.5)
+    titles, ratings = [], []
+    for i, _ in scores:
+        titles.append(movies.iloc[i].title)
+        r = movies.iloc[i].vote_average
+        ratings.append(5 if r >= 5 else 4 if r >= 4 else 2.5)
 
     return titles, ratings
 
@@ -92,15 +85,13 @@ st.sidebar.info(
     Built for **Placement Showcase**
     """
 )
-st.sidebar.markdown("---")
-st.sidebar.write("👨‍💻 **Created by:** Vashu Choudhary")
 
 # -------------------- MAIN UI --------------------
 st.markdown(
     """
-    <h1 style='text-align:center;color:#f5c518;'>🎬 Movie Recommender System</h1>
+    <h1 style='text-align:center;color:#f5c518;'>🎬 Movie Recommendation System</h1>
     <p style='text-align:center;color:#9aa0a6;'>
-    Select a movie to get recommendations
+    Type a movie name and press Enter or click Recommend
     </p>
     """,
     unsafe_allow_html=True
@@ -108,29 +99,26 @@ st.markdown(
 
 st.markdown("---")
 
-# -------------------- INPUT SECTION --------------------
-col1, col2 = st.columns([3, 1])
+# -------------------- INPUT (SEARCH + ENTER SUPPORT) --------------------
+selected_movie = st.selectbox(
+    "🎞️ Search or select a movie",
+    movies["title"].values,
+    index=None,
+    placeholder="Type movie name..."
+)
 
-with col1:
-    selected_movie = st.selectbox(
-        "🎞️ Select a movie",
-        movies["title"].values
-    )
+recommend_btn = st.button("✨ Recommend Movies")
 
-with col2:
-    st.write("")
-    st.write("")
-    recommend_btn = st.button("✨ Recommend Movies")
+# -------------------- TRIGGER LOGIC --------------------
+if selected_movie and (recommend_btn or st.session_state.get("last_movie") != selected_movie):
+    st.session_state["last_movie"] = selected_movie
 
-# -------------------- OUTPUT SECTION --------------------
-if recommend_btn:
-    with st.spinner("Finding best recommendations..."):
-        titles, ratings = recommend(selected_movie)
+    titles, ratings = recommend(selected_movie)
 
     if titles:
         st.success("✅ Movies you may like:")
-
         cols = st.columns(5)
+
         for i in range(5):
             with cols[i]:
                 st.markdown(
@@ -143,7 +131,7 @@ if recommend_btn:
                     unsafe_allow_html=True
                 )
     else:
-        st.error("❌ Movie not found in database.")
+        st.error("❌ Movie not found.")
 
 # -------------------- FOOTER --------------------
 st.markdown("---")
